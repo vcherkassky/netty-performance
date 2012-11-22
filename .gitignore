@@ -4,3 +4,15 @@
 *.jar
 *.war
 *.ear
+
+# eclipse
+.classpath
+.project
+.settings/
+
+# sublime
+*.sublime-project
+*.sublime-workspace
+
+# maven
+target/
