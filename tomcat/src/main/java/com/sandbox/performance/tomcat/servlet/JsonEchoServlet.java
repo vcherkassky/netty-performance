@@ -1,4 +1,4 @@
-package com.sandbox.performance.netty.tomcat.base.servlet;
+package com.sandbox.performance.tomcat.servlet;
 
 import java.io.IOException;
 

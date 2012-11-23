@@ -4,7 +4,7 @@
 	<servlet>
 		<display-name>Json Echo</display-name>
 		<servlet-name>JsonEchoServlet</servlet-name>
-		<servlet-class>com.sandbox.performance.netty.tomcat.base.servlet.JsonEchoServlet</servlet-class>
+		<servlet-class>com.sandbox.performance.tomcat.servlet.JsonEchoServlet</servlet-class>
 	</servlet>
 
 	<servlet-mapping>
