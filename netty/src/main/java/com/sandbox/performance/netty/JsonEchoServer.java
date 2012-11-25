@@ -1,5 +1,12 @@
 package com.sandbox.performance.netty;
 
+import static com.google.common.base.Charsets.UTF_8;
+import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.METHOD_NOT_ALLOWED;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.OK;
+
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.Collections;
@@ -12,7 +19,6 @@ import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFactory;
-import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelPipeline;
@@ -25,21 +31,19 @@ import org.jboss.netty.channel.group.ChannelGroup;
 import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
+import org.jboss.netty.handler.codec.http.HttpHeaders;
 import org.jboss.netty.handler.codec.http.HttpMethod;
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpServerCodec;
 import org.jboss.netty.handler.codec.http.HttpVersion;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Strings;
 
 
 public class JsonEchoServer {
 	
-	private static final Logger logger = LoggerFactory.getLogger(JsonEchoServer.class);
+//	private static final Logger logger = LoggerFactory.getLogger(JsonEchoServer.class);
 
 	private final Executor bossExecutor = Executors.newCachedThreadPool();
 	private final Executor workerExecutor = Executors.newCachedThreadPool();
@@ -109,23 +113,26 @@ public class JsonEchoServer {
 //				logger.trace("path: '{}', query: '{}', params: {}", new Object[]{path, query, paramsMap});
 
 				if(!"/echo".equals(path))
-					res = notFound(version, "{'status':'error', 'message':'Uri [" + strUri + "] not found'}");
-				else if(!paramsMap.containsKey("message"))
-					res = badRequest(version, "{'status':'error', 'message':'[message] is a required parameter'}");
+					res = notFound("{'status':'error', 'message':'Uri [" + strUri + "] not found'}", version);
 				else {
-					res = new DefaultHttpResponse(version, HttpResponseStatus.OK);
-					res.setContent(ChannelBuffers.copiedBuffer("{'status':'ok', 'message':'Echo: " + paramsMap.get("message") + "'}", Charsets.UTF_8));
+					String message = paramsMap.get("message");
+					if(message == null)
+    					res = badRequest("{'status':'error', 'message':'[message] is a required parameter'}", version);
+    				else
+    					res = genericResponse(OK, "{'status':'ok', 'message':'Echo: " + message + "'}", version);
 				}
 			
 			} else {
-				res = new DefaultHttpResponse(version, HttpResponseStatus.METHOD_NOT_ALLOWED);
-				res.setContent(ChannelBuffers.copiedBuffer("{'status':'error', 'message':'Only GET requests are  supported'}", Charsets.UTF_8));
+				res = genericResponse(METHOD_NOT_ALLOWED, "{'status':'error', 'message':'Only GET requests are  supported'}", version);
 			}
 
-			res.setHeader("Content-Type", "application/json");
+			res.setHeader(CONTENT_TYPE, "application/json");
+			// set HTTP keep-alive header to response if it's contained in a request
+			HttpHeaders.setKeepAlive(res, HttpHeaders.isKeepAlive(req));
 
 			Channel channel = ctx.getChannel();
-			channel.write(res).addListener(CLOSE_CHANNEL_ON_COMPLETE);
+			// close channel when write is done
+			Channels.write(channel, res).addListener(ChannelFutureListener.CLOSE);
 		}
 
 		private Map<String, String> parseParams(String query) {
@@ -133,6 +140,14 @@ public class JsonEchoServer {
 				return Collections.emptyMap();
 			
 			String[] paramPairs = query.split("&");
+			if(paramPairs.length == 1) {
+				String[] pairSplit = paramPairs[0].split("=", 2);
+				
+				if(pairSplit.length < 2)
+					return Collections.singletonMap(pairSplit[0], "");
+				else
+					return Collections.singletonMap(pairSplit[0], pairSplit[1]);
+			} 
 			Map<String, String> paramsMap = new HashMap<String, String>(paramPairs.length * 4/3, 0.75f);
 			for(String pair: paramPairs) {
 				String[] pairSplit = pair.split("=", 2);
@@ -145,15 +160,21 @@ public class JsonEchoServer {
 			return paramsMap;
 		}
 		
-		private DefaultHttpResponse notFound(HttpVersion version, String message) {
-			DefaultHttpResponse res = new DefaultHttpResponse(version, HttpResponseStatus.NOT_FOUND);
-			res.setContent(ChannelBuffers.copiedBuffer(message, Charsets.UTF_8));
+		private DefaultHttpResponse genericResponse(HttpResponseStatus status, String message, HttpVersion version) {
+			DefaultHttpResponse res = new DefaultHttpResponse(version, status);
+			res.setContent(ChannelBuffers.copiedBuffer(message, UTF_8));
 			return res;
 		}
 		
-		private DefaultHttpResponse badRequest(HttpVersion version, String message) {
-			DefaultHttpResponse res = new DefaultHttpResponse(version, HttpResponseStatus.BAD_REQUEST);
-			res.setContent(ChannelBuffers.copiedBuffer(message, Charsets.UTF_8));
+		private DefaultHttpResponse notFound(String message, HttpVersion version) {
+			DefaultHttpResponse res = new DefaultHttpResponse(version, NOT_FOUND);
+			res.setContent(ChannelBuffers.copiedBuffer(message, UTF_8));
+			return res;
+		}
+		
+		private DefaultHttpResponse badRequest(String message, HttpVersion version) {
+			DefaultHttpResponse res = new DefaultHttpResponse(version, BAD_REQUEST);
+			res.setContent(ChannelBuffers.copiedBuffer(message, UTF_8));
 			return res;
 		}
 
@@ -163,12 +184,5 @@ public class JsonEchoServer {
 			allChannels.add(channel);
 //			logger.info("Channel opened, {}", channel);
 		}
-		
-		private final ChannelFutureListener CLOSE_CHANNEL_ON_COMPLETE = new ChannelFutureListener() {
-			@Override
-			public void operationComplete(ChannelFuture future) throws Exception {
-				future.getChannel().close();
-			}
-		};
 	}
 }
